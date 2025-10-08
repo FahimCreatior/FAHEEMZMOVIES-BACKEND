@@ -592,7 +592,21 @@ app.get('/api/stream', async (req, res) => {
     }
 });
 
-// Start the server
-app.listen(PORT, () => {
-    console.log(`Proxy server running on http://localhost:${PORT}`);
+// Discover movies endpoint
+app.get('/discover/movie', async (req, res) => {
+  try {
+    const { api_key, with_genres, page = 1, language = 'en-US' } = req.query;
+
+    if (!api_key || !with_genres) {
+      return res.status(400).json({ error: 'Missing required query parameters: api_key and with_genres' });
+    }
+
+    const tmdbUrl = `https://api.themoviedb.org/3/discover/movie?api_key=${api_key}&with_genres=${with_genres}&page=${page}&language=${language}`;
+
+    const response = await axios.get(tmdbUrl);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching from TMDB:', error);
+    res.status(500).json({ error: 'Failed to fetch movie data' });
+  }
 });
