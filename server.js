@@ -580,102 +580,13 @@ app.get('/api/extract-stream', async (req, res) => {
 
 // Proxy endpoint for streaming video
 app.get('/api/stream', async (req, res) => {
-    let page;
-    let browser;
     let url = req.query.url;
-    
+
+    if (!url) {
+        return res.status(400).json({ error: 'URL parameter is required' });
+    }
+
     try {
-        // Use Puppeteer to handle Cloudflare
-        browser = await puppeteer.launch({
-            headless: 'new',
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process',
-                '--disable-gpu'
-            ]
-        });
-        
-        page = await browser.newPage();
-        
-        // Set a realistic user agent
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-        
-        // Set viewport to a common desktop size
-        await page.setViewport({ width: 1366, height: 768 });
-        
-        console.log('Opening page to handle Cloudflare...');
-        
-        // Listen for responses to find the m3u8 URL
-        const videoUrlPromise = new Promise((resolve) => {
-            page.on('response', async (response) => {
-                const url = response.url();
-                if (url.includes('.m3u8')) {
-                    console.log('Found m3u8 URL:', url);
-                    resolve(url);
-                }
-            });
-        });
-        
-        // Navigate to the URL
-        await page.goto(url, {
-            waitUntil: 'networkidle2',
-            timeout: 60000
-        });
-        
-        console.log('Page loaded, waiting for video...');
-        
-        // Wait for either the video element or the m3u8 URL
-        const videoUrl = await Promise.race([
-            videoUrlPromise,
-            page.waitForSelector('video', { timeout: 30000 })
-                .then(() => page.evaluate(() => document.querySelector('video')?.src)),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout waiting for video')), 30000))
-        ]);
-        
-        if (!videoUrl) {
-            throw new Error('Could not find video URL');
-        }
-        
-        console.log('Video URL found:', videoUrl);
-        
-        // Get cookies to maintain session
-        const cookies = await page.cookies();
-        const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-        
-        // Close the browser as we don't need it anymore
-        await browser.close();
-        
-        // Now make the request with the session cookies
-        const response = await axios({
-            method: 'get',
-            url: videoUrl,
-            responseType: 'stream',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'https://vidlink.pro/',
-                'Origin': 'https://vidlink.pro',
-                'Cookie': cookieHeader,
-                'Accept': '*/*',
-                'Accept-Encoding': 'identity;q=1, *;q=0',
-                'Connection': 'keep-alive'
-            },
-            timeout: 30000,
-            maxContentLength: 1024 * 1024 * 1024,
-            maxBodyLength: 1024 * 1024 * 1024,
-            validateStatus: null,
-            decompress: false,
-            maxRedirects: 5
-        });
-        
-        if (!url) {
-            return res.status(400).json({ error: 'URL parameter is required' });
-        }
-        
         console.log('\n=== Proxying Stream ===');
         console.log('Original URL:', url);
 
@@ -684,24 +595,26 @@ app.get('/api/stream', async (req, res) => {
         const headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'Referer': 'https://vidlink.pro/',
-            'Origin': 'https://vidlink.pro'
+            'Origin': 'https://vidlink.pro',
+            'Accept': '*/*',
+            'Accept-Encoding': 'identity;q=1, *;q=0',
+            'Connection': 'keep-alive'
         };
 
         // Try to extract headers from URL parameters
         try {
-            // Handle the headers parameter which is already URL-encoded JSON
             const headersMatch = url.match(/headers=([^&]*)/);
             if (headersMatch && headersMatch[1]) {
                 const headersJson = decodeURIComponent(headersMatch[1]);
                 const customHeaders = JSON.parse(headersJson);
                 Object.assign(headers, customHeaders);
-                
+
                 // Reconstruct the URL without the headers parameter
                 const urlWithoutHeaders = url.split('?')[0];
                 const searchParams = new URLSearchParams(url.split('?')[1] || '');
                 searchParams.delete('headers');
-                url = searchParams.toString() ? 
-                    `${urlWithoutHeaders}?${searchParams.toString()}` : 
+                url = searchParams.toString() ?
+                    `${urlWithoutHeaders}?${searchParams.toString()}` :
                     urlWithoutHeaders;
             }
         } catch (e) {
@@ -709,35 +622,15 @@ app.get('/api/stream', async (req, res) => {
             console.error('Headers parsing error:', e.message);
         }
 
-        console.log('Proxying to URL:', url);
+        console.log('Final URL being requested:', url);
         console.log('Using headers:', headers);
 
-        console.log('Final URL being requested:', url);
-        
-        // Log the exact request being made
-        console.log('\n=== Making Request ===');
-        console.log('URL:', url);
-        console.log('Method: GET');
-        console.log('Headers:', {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Referer': headers.referer || 'https://vidlink.pro/',
-            'Origin': headers.origin || 'https://vidlink.pro',
-            'Accept': '*/*'
-        });
-
-        // Make the request
-        response = await axios({
+        // Make the request directly (no Puppeteer needed for proxying)
+        const response = await axios({
             method: 'get',
             url: url,
             responseType: 'stream',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Referer': headers.referer || 'https://vidlink.pro/',
-                'Origin': headers.origin || 'https://vidlink.pro',
-                'Accept': '*/*',
-                'Accept-Encoding': 'identity;q=1, *;q=0',
-                'Connection': 'keep-alive'
-            },
+            headers: headers,
             timeout: 30000,
             maxContentLength: 1024 * 1024 * 1024,
             maxBodyLength: 1024 * 1024 * 1024,
@@ -746,9 +639,8 @@ app.get('/api/stream', async (req, res) => {
             maxRedirects: 5
         });
 
-        // Log response info (without the body)
-        console.log('\n=== Response Received ===');
-        console.log('Status:', response.status, response.statusText);
+        // Log response info
+        console.log('Response Status:', response.status, response.statusText);
         console.log('Response Headers:', response.headers);
 
         // Forward the appropriate headers
@@ -773,21 +665,22 @@ app.get('/api/stream', async (req, res) => {
             const start = parseInt(parts[0], 10);
             const end = parts[1] ? parseInt(parts[1], 10) : response.data.length - 1;
             const chunksize = (end - start) + 1;
-            
+
             responseHeaders['Content-Range'] = `bytes ${start}-${end}/${response.data.length}`;
             responseHeaders['Content-Length'] = chunksize;
-            
+
             res.writeHead(206, responseHeaders);
             response.data.pipe(res);
         } else {
             res.writeHead(200, responseHeaders);
             response.data.pipe(res);
         }
+
     } catch (error) {
         console.error('Proxy error:', error);
         const status = error.response?.status || 500;
         const message = error.response?.statusText || 'Failed to fetch the video stream';
-        res.status(status).json({ 
+        res.status(status).json({
             error: message,
             details: error.message,
             url: url,
@@ -797,11 +690,6 @@ app.get('/api/stream', async (req, res) => {
                 headers: error.response.headers
             } : undefined
         });
-    } finally {
-        // Clean up the response if it exists
-        if (response && response.data) {
-            response.data.destroy();
-        }
     }
 });
 
