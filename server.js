@@ -604,15 +604,21 @@ app.get('/api/video-proxy', async (req, res) => {
             url: url,
             responseType: 'stream',
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Referer': 'https://vidlink.pro/',
-                'Accept': '*/*'
+                'Accept': '*/*',
+                'Accept-Encoding': 'identity;q=1, *;q=0',
+                'Connection': 'keep-alive'
             },
             timeout: 30000,
             maxContentLength: 1024 * 1024 * 1024,
             maxBodyLength: 1024 * 1024 * 1024,
-            validateStatus: null,
-            decompress: false
+            validateStatus: function (status) {
+                // Accept both successful and redirect status codes
+                return status >= 200 && status < 400;
+            },
+            decompress: false,
+            maxRedirects: 10
         });
 
         // Forward important headers
