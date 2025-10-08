@@ -10,26 +10,20 @@ let browser;
 
 // Launch browser when the server starts
 (async () => {
-    try {
-        browser = await puppeteer.launch({
-            headless: 'new',
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process',
-                '--disable-gpu'
-            ]
-        });
-        console.log('Puppeteer browser launched');
-    } catch (error) {
-        console.error('Failed to launch Puppeteer browser:', error.message);
-        console.log('Continuing without browser - some features may not work');
-        browser = null;
-    }
+    browser = await puppeteer.launch({
+        headless: 'new',
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
+        ]
+    });
+    console.log('Puppeteer browser launched');
 })();
 
 // Close browser when the server is shutting down
@@ -45,7 +39,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
@@ -78,9 +72,6 @@ app.get('/', (req, res) => {
 
 // Extract stream URL from video provider
 app.get('/api/extract-stream', async (req, res) => {
-    if (!browser) {
-        return res.status(503).json({ error: 'Browser not available - Puppeteer failed to launch' });
-    }
     let page;
     try {
         const { url } = req.query;
@@ -395,10 +386,6 @@ app.get('/api/stream', async (req, res) => {
                 '--disable-gpu'
             ]
         });
-    } catch (error) {
-        console.error('Failed to launch Puppeteer browser in /api/stream:', error.message);
-        return res.status(503).json({ error: 'Browser not available - Puppeteer failed to launch' });
-    }
         
         page = await browser.newPage();
         
@@ -605,21 +592,7 @@ app.get('/api/stream', async (req, res) => {
     }
 });
 
-// Discover movies endpoint
-app.get('/discover/movie', async (req, res) => {
-  try {
-    const { api_key, with_genres, page = 1, language = 'en-US' } = req.query;
-
-    if (!api_key || !with_genres) {
-      return res.status(400).json({ error: 'Missing required query parameters: api_key and with_genres' });
-    }
-
-    const tmdbUrl = `https://api.themoviedb.org/3/discover/movie?api_key=${api_key}&with_genres=${with_genres}&page=${page}&language=${language}`;
-
-    const response = await axios.get(tmdbUrl);
-    res.json(response.data);
-  } catch (error) {
-    console.error('Error fetching from TMDB:', error);
-    res.status(500).json({ error: 'Failed to fetch movie data' });
-  }
+// Start the server
+app.listen(PORT, () => {
+    console.log(`Proxy server running on http://localhost:${PORT}`);
 });
