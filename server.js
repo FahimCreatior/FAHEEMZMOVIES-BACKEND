@@ -590,42 +590,32 @@ app.get('/api/stream', async (req, res) => {
         console.log('\n=== Proxying Stream ===');
         console.log('Original URL:', url);
 
-        // Parse the URL to extract headers if they exist
-        const urlObj = new URL(url);
+        // For complex URLs with headers and host parameters, use them as-is
+        // but add our standard headers that are required
         const headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Referer': 'https://vidlink.pro/',
-            'Origin': 'https://vidlink.pro',
             'Accept': '*/*',
             'Accept-Encoding': 'identity;q=1, *;q=0',
             'Connection': 'keep-alive'
         };
 
-        // Try to extract headers from URL parameters
+        // Parse the URL to extract custom headers if they exist
         try {
+            const urlObj = new URL(url);
             const headersMatch = url.match(/headers=([^&]*)/);
             if (headersMatch && headersMatch[1]) {
                 const headersJson = decodeURIComponent(headersMatch[1]);
                 const customHeaders = JSON.parse(headersJson);
                 Object.assign(headers, customHeaders);
-
-                // Reconstruct the URL without the headers parameter
-                const urlWithoutHeaders = url.split('?')[0];
-                const searchParams = new URLSearchParams(url.split('?')[1] || '');
-                searchParams.delete('headers');
-                url = searchParams.toString() ?
-                    `${urlWithoutHeaders}?${searchParams.toString()}` :
-                    urlWithoutHeaders;
             }
         } catch (e) {
             console.log('Could not parse custom headers, using defaults');
-            console.error('Headers parsing error:', e.message);
         }
 
         console.log('Final URL being requested:', url);
         console.log('Using headers:', headers);
 
-        // Make the request directly (no Puppeteer needed for proxying)
+        // Make the request directly
         const response = await axios({
             method: 'get',
             url: url,
