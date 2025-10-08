@@ -5,6 +5,10 @@ import axios from 'axios';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
+// TMDB API Configuration
+const TMDB_API_KEY = process.env.TMDB_API_KEY;
+const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
+
 // Global browser instance
 let browser;
 
@@ -52,6 +56,25 @@ app.use((req, res, next) => {
     next();
 });
 
+// TMDB API helper function
+function tmdbRequest(endpoint, params = {}) {
+    const url = new URL(`${TMDB_BASE_URL}${endpoint}`);
+    url.searchParams.append('api_key', TMDB_API_KEY);
+    url.searchParams.append('language', 'en-US');
+    
+    // Add additional params
+    Object.keys(params).forEach(key => {
+        url.searchParams.append(key, params[key]);
+    });
+    
+    return axios.get(url.toString())
+        .then(response => response.data)
+        .catch(error => {
+            console.error(`TMDB API Error for ${endpoint}:`, error.response?.data || error.message);
+            throw error;
+        });
+}
+
 // Root route
 app.get('/', (req, res) => {
     res.send(`
@@ -60,6 +83,13 @@ app.get('/', (req, res) => {
         <ul>
             <li><strong>GET /api/extract-stream?url=VIDEO_URL</strong> - Extract clean stream URL from video provider (Movies & TV Shows)</li>
             <li><strong>GET /api/stream?url=STREAM_URL</strong> - Proxy for video streaming</li>
+            <li><strong>GET /api/movies/search?query=SEARCH_TERM</strong> - Search movies</li>
+            <li><strong>GET /api/movies/:id</strong> - Get movie details</li>
+            <li><strong>GET /api/movies/:id/recommendations</strong> - Get related movies</li>
+            <li><strong>GET /api/tv/search?query=SEARCH_TERM</strong> - Search TV shows</li>
+            <li><strong>GET /api/tv/:id</strong> - Get TV show details</li>
+            <li><strong>GET /api/tv/:id/recommendations</strong> - Get related TV shows</li>
+            <li><strong>GET /api/discover/:type?genre=GENRE_ID</strong> - Discover movies/TV shows by genre</li>
         </ul>
         <p>Supported URL formats:</p>
         <ul>
