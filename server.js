@@ -560,7 +560,6 @@ app.get('/api/extract-stream', async (req, res) => {
                 originalUrl: url,
                 cleanStreamUrl: streamUrl,
                 isAdFree: true,
-                capturedFromNetwork: capturedUrls.m3u8.length > 0 || capturedUrls.mp4.length > 0,
                 contentType: url.includes('/tv/') ? 'tv' : 'movie'
             }
         });
@@ -578,107 +577,71 @@ app.get('/api/extract-stream', async (req, res) => {
     }
 });
 
-// Proxy endpoint for streaming video
-app.get('/api/stream', async (req, res) => {
-    let url = req.query.url;
+// Simple CORS-enabled video proxy
+app.get('/api/video-proxy', async (req, res) => {
+    const url = req.query.url;
 
     if (!url) {
         return res.status(400).json({ error: 'URL parameter is required' });
     }
 
     try {
-        console.log('\n=== Proxying Stream ===');
-        console.log('Original URL:', url);
+        console.log('🎬 Proxying video URL:', url);
 
-        // For complex URLs with headers and host parameters, use them as-is
-        // but add our standard headers that are required
-        const headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': '*/*',
-            'Accept-Encoding': 'identity;q=1, *;q=0',
-            'Connection': 'keep-alive'
-        };
+        // Set CORS headers for video content
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Range, Accept, Accept-Encoding, Referer, User-Agent');
 
-        // Parse the URL to extract custom headers if they exist
-        try {
-            const urlObj = new URL(url);
-            const headersMatch = url.match(/headers=([^&]*)/);
-            if (headersMatch && headersMatch[1]) {
-                const headersJson = decodeURIComponent(headersMatch[1]);
-                const customHeaders = JSON.parse(headersJson);
-                Object.assign(headers, customHeaders);
-            }
-        } catch (e) {
-            console.log('Could not parse custom headers, using defaults');
+        // Handle preflight requests
+        if (req.method === 'OPTIONS') {
+            res.status(200).end();
+            return;
         }
 
-        console.log('Final URL being requested:', url);
-        console.log('Using headers:', headers);
-
-        // Make the request directly
         const response = await axios({
             method: 'get',
             url: url,
             responseType: 'stream',
-            headers: headers,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://vidlink.pro/',
+                'Accept': '*/*'
+            },
             timeout: 30000,
             maxContentLength: 1024 * 1024 * 1024,
             maxBodyLength: 1024 * 1024 * 1024,
             validateStatus: null,
-            decompress: false,
-            maxRedirects: 5
+            decompress: false
         });
 
-        // Log response info
-        console.log('Response Status:', response.status, response.statusText);
-        console.log('Response Headers:', response.headers);
-
-        // Forward the appropriate headers
-        const responseHeaders = {
-            'Content-Type': response.headers['content-type'] || 'application/octet-stream',
-            'Accept-Ranges': 'bytes',
-            'Cache-Control': 'no-cache',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Range',
-            'Access-Control-Expose-Headers': 'Content-Length, Content-Range'
-        };
-
-        // Only set Content-Length if it exists
+        // Forward important headers
+        if (response.headers['content-type']) {
+            res.setHeader('Content-Type', response.headers['content-type']);
+        }
         if (response.headers['content-length']) {
-            responseHeaders['Content-Length'] = response.headers['content-length'];
+            res.setHeader('Content-Length', response.headers['content-length']);
+        }
+        if (response.headers['accept-ranges']) {
+            res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
         }
 
-        // Handle partial content (seeking)
+        // Handle range requests for seeking
         const range = req.headers.range;
-        if (range) {
-            const parts = range.replace(/bytes=/, '').split('-');
-            const start = parseInt(parts[0], 10);
-            const end = parts[1] ? parseInt(parts[1], 10) : response.data.length - 1;
-            const chunksize = (end - start) + 1;
-
-            responseHeaders['Content-Range'] = `bytes ${start}-${end}/${response.data.length}`;
-            responseHeaders['Content-Length'] = chunksize;
-
-            res.writeHead(206, responseHeaders);
-            response.data.pipe(res);
+        if (range && response.status === 200) {
+            res.setHeader('Content-Range', response.headers['content-range'] || `bytes ${range.replace('bytes=', '')}/*`);
+            res.status(206);
         } else {
-            res.writeHead(200, responseHeaders);
-            response.data.pipe(res);
+            res.status(response.status);
         }
+
+        response.data.pipe(res);
 
     } catch (error) {
-        console.error('Proxy error:', error);
-        const status = error.response?.status || 500;
-        const message = error.response?.statusText || 'Failed to fetch the video stream';
-        res.status(status).json({
-            error: message,
-            details: error.message,
-            url: url,
-            response: error.response ? {
-                status: error.response.status,
-                statusText: error.response.statusText,
-                headers: error.response.headers
-            } : undefined
+        console.error('Video proxy error:', error);
+        res.status(error.response?.status || 500).json({
+            error: 'Failed to proxy video',
+            details: error.message
         });
     }
 });
