@@ -52,21 +52,24 @@ app.use(express.json());
 // Set basic security headers
 app.use((req, res, next) => {
     // Set Content Security Policy
-    res.setHeader('Content-Security-Policy', "default-src 'self'; connect-src 'self' https:;");
     next();
 });
 
 // TMDB API helper function
 function tmdbRequest(endpoint, params = {}) {
+    if (!TMDB_API_KEY) {
+        throw new Error('TMDB API key not configured');
+    }
+
     const url = new URL(`${TMDB_BASE_URL}${endpoint}`);
     url.searchParams.append('api_key', TMDB_API_KEY);
     url.searchParams.append('language', 'en-US');
-    
+
     // Add additional params
     Object.keys(params).forEach(key => {
         url.searchParams.append(key, params[key]);
     });
-    
+
     return axios.get(url.toString())
         .then(response => response.data)
         .catch(error => {
@@ -75,29 +78,209 @@ function tmdbRequest(endpoint, params = {}) {
         });
 }
 
-// Root route
-app.get('/', (req, res) => {
-    res.send(`
-        <h1>FAHEEMZMOVIES Proxy Server</h1>
-        <p>API Endpoints:</p>
-        <ul>
-            <li><strong>GET /api/extract-stream?url=VIDEO_URL</strong> - Extract clean stream URL from video provider (Movies & TV Shows)</li>
-            <li><strong>GET /api/stream?url=STREAM_URL</strong> - Proxy for video streaming</li>
-            <li><strong>GET /api/movies/search?query=SEARCH_TERM</strong> - Search movies</li>
-            <li><strong>GET /api/movies/:id</strong> - Get movie details</li>
-            <li><strong>GET /api/movies/:id/recommendations</strong> - Get related movies</li>
-            <li><strong>GET /api/tv/search?query=SEARCH_TERM</strong> - Search TV shows</li>
-            <li><strong>GET /api/tv/:id</strong> - Get TV show details</li>
-            <li><strong>GET /api/tv/:id/recommendations</strong> - Get related TV shows</li>
-            <li><strong>GET /api/discover/:type?genre=GENRE_ID</strong> - Discover movies/TV shows by genre</li>
-        </ul>
-        <p>Supported URL formats:</p>
-        <ul>
-            <li>Movies: <code>https://vidlink.pro/movie/{movieId}</code></li>
-            <li>TV Shows: <code>https://vidlink.pro/tv/{tvId}/{season}/{episode}</code></li>
-        </ul>
-        <p>Check the server console for detailed logs of requests.</p>
-    `);
+// TMDB API Endpoints
+
+// Search movies
+app.get('/api/movies/search', async (req, res) => {
+    try {
+        if (!TMDB_API_KEY) {
+            return res.status(500).json({
+                error: 'TMDB API key not configured',
+                message: 'Please set TMDB_API_KEY environment variable'
+            });
+        }
+
+        const { query, page = 1 } = req.query;
+        if (!query) {
+            return res.status(400).json({ error: 'Query parameter is required' });
+        }
+
+        console.log('🔍 Searching movies for:', query);
+        const data = await tmdbRequest('/search/movie', { query, page });
+        res.json(data.results);
+    } catch (error) {
+        console.error('Error searching movies:', error);
+        res.status(500).json({
+            error: 'Failed to search movies',
+            details: error.response?.data?.status_message || error.message
+        });
+    }
+});
+
+// Get movie details
+app.get('/api/movies/:id', async (req, res) => {
+    try {
+        if (!TMDB_API_KEY) {
+            return res.status(500).json({
+                error: 'TMDB API key not configured',
+                message: 'Please set TMDB_API_KEY environment variable'
+            });
+        }
+
+        const { id } = req.params;
+        console.log('🎬 Fetching movie details for ID:', id);
+        const data = await tmdbRequest(`/movie/${id}`);
+        res.json(data);
+    } catch (error) {
+        console.error('Error fetching movie details:', error);
+        res.status(500).json({
+            error: 'Failed to fetch movie details',
+            details: error.response?.data?.status_message || error.message
+        });
+    }
+});
+
+// Get movie recommendations
+app.get('/api/movies/:id/recommendations', async (req, res) => {
+    try {
+        if (!TMDB_API_KEY) {
+            return res.status(500).json({
+                error: 'TMDB API key not configured',
+                message: 'Please set TMDB_API_KEY environment variable'
+            });
+        }
+
+        const { id } = req.params;
+        console.log('🎯 Fetching movie recommendations for ID:', id);
+        const data = await tmdbRequest(`/movie/${id}/recommendations`);
+        res.json(data.results);
+    } catch (error) {
+        console.error('Error fetching movie recommendations:', error);
+        res.status(500).json({
+            error: 'Failed to fetch movie recommendations',
+            details: error.response?.data?.status_message || error.message
+        });
+    }
+});
+
+// Search TV shows
+app.get('/api/tv/search', async (req, res) => {
+    try {
+        if (!TMDB_API_KEY) {
+            return res.status(500).json({
+                error: 'TMDB API key not configured',
+                message: 'Please set TMDB_API_KEY environment variable'
+            });
+        }
+
+        const { query, page = 1 } = req.query;
+        if (!query) {
+            return res.status(400).json({ error: 'Query parameter is required' });
+        }
+
+        console.log('🔍 Searching TV shows for:', query);
+        const data = await tmdbRequest('/search/tv', { query, page });
+        res.json(data.results);
+    } catch (error) {
+        console.error('Error searching TV shows:', error);
+        res.status(500).json({
+            error: 'Failed to search TV shows',
+            details: error.response?.data?.status_message || error.message
+        });
+    }
+});
+
+// Get TV show details
+app.get('/api/tv/:id', async (req, res) => {
+    try {
+        if (!TMDB_API_KEY) {
+            return res.status(500).json({
+                error: 'TMDB API key not configured',
+                message: 'Please set TMDB_API_KEY environment variable'
+            });
+        }
+
+        const { id } = req.params;
+        console.log('📺 Fetching TV show details for ID:', id);
+        const data = await tmdbRequest(`/tv/${id}`);
+        res.json(data);
+    } catch (error) {
+        console.error('Error fetching TV show details:', error);
+        res.status(500).json({
+            error: 'Failed to fetch TV show details',
+            details: error.response?.data?.status_message || error.message
+        });
+    }
+});
+
+// Get TV show recommendations
+app.get('/api/tv/:id/recommendations', async (req, res) => {
+    try {
+        if (!TMDB_API_KEY) {
+            return res.status(500).json({
+                error: 'TMDB API key not configured',
+                message: 'Please set TMDB_API_KEY environment variable'
+            });
+        }
+
+        const { id } = req.params;
+        console.log('🎯 Fetching TV show recommendations for ID:', id);
+        const data = await tmdbRequest(`/tv/${id}/recommendations`);
+        res.json(data.results);
+    } catch (error) {
+        console.error('Error fetching TV show recommendations:', error);
+        res.status(500).json({
+            error: 'Failed to fetch TV show recommendations',
+            details: error.response?.data?.status_message || error.message
+        });
+    }
+});
+
+// Get season details with episodes
+app.get('/api/tv/:id/season/:season', async (req, res) => {
+    try {
+        if (!TMDB_API_KEY) {
+            return res.status(500).json({
+                error: 'TMDB API key not configured',
+                message: 'Please set TMDB_API_KEY environment variable'
+            });
+        }
+
+        const { id, season } = req.params;
+        console.log(`📺 Fetching season ${season} details for TV show ID:`, id);
+        const data = await tmdbRequest(`/tv/${id}/season/${season}`);
+        res.json(data);
+    } catch (error) {
+        console.error('Error fetching season details:', error);
+        res.status(500).json({
+            error: 'Failed to fetch season details',
+            details: error.response?.data?.status_message || error.message
+        });
+    }
+});
+
+// Discover content by genre
+app.get('/api/discover/:type', async (req, res) => {
+    try {
+        if (!TMDB_API_KEY) {
+            return res.status(500).json({
+                error: 'TMDB API key not configured',
+                message: 'Please set TMDB_API_KEY environment variable'
+            });
+        }
+
+        const { type } = req.params;
+        const { genre, page = 1 } = req.query;
+
+        if (!['movie', 'tv'].includes(type)) {
+            return res.status(400).json({ error: 'Type must be either movie or tv' });
+        }
+
+        console.log(`🎭 Discovering ${type}s by genre:`, genre || 'all');
+        const params = { page };
+        if (genre) {
+            params.with_genres = genre;
+        }
+
+        const data = await tmdbRequest(`/discover/${type}`, params);
+        res.json(data.results);
+    } catch (error) {
+        console.error('Error discovering content:', error);
+        res.status(500).json({
+            error: 'Failed to discover content',
+            details: error.response?.data?.status_message || error.message
+        });
+    }
 });
 
 // Extract stream URL from video provider
