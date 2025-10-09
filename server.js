@@ -287,15 +287,15 @@ app.get('/api/discover/:type', async (req, res) => {
 app.get('/api/extract-stream', async (req, res) => {
     let page;
     try {
-        const { url } = req.query;
+        const { url: targetUrl } = req.query;
         
-        if (!url) {
+        if (!targetUrl) {
             return res.status(400).json({ error: 'URL parameter is required' });
         }
         
         console.log('\n=== Extracting Clean Stream URL (No Ads) ===');
-        console.log('Original URL:', url);
-        console.log('Content Type:', url.includes('/tv/') ? 'TV Show' : 'Movie');
+        console.log('Original URL:', targetUrl);
+        console.log('Content Type:', targetUrl.includes('/tv/') ? 'TV Show' : 'Movie');
 
         // Create a new page
         page = await browser.newPage();
@@ -315,23 +315,23 @@ app.get('/api/extract-stream', async (req, res) => {
         // Enable request interception to capture video URLs
         await page.setRequestInterception(true);
         page.on('request', (request) => {
-            const url = request.url();
+            const requestUrl = request.url();
             const resourceType = request.resourceType();
             
             // Capture video-related URLs
-            if (url.includes('.m3u8')) {
-                capturedUrls.m3u8.push(url);
-                console.log('📹 Found M3U8:', url);
-            } else if (url.includes('.mp4') || url.includes('.webm') || url.includes('.mkv')) {
-                capturedUrls.mp4.push(url);
-                console.log('📹 Found Video:', url);
+            if (requestUrl.includes('.m3u8')) {
+                capturedUrls.m3u8.push(requestUrl);
+                console.log('📹 Found M3U8:', requestUrl);
+            } else if (requestUrl.includes('.mp4') || requestUrl.includes('.webm') || requestUrl.includes('.mkv')) {
+                capturedUrls.mp4.push(requestUrl);
+                console.log('📹 Found Video:', requestUrl);
             }
             
             // Block ads and unnecessary resources
             if (['image', 'stylesheet', 'font'].includes(resourceType) || 
-                url.includes('ads') || 
-                url.includes('analytics') || 
-                url.includes('tracking')) {
+                requestUrl.includes('ads') || 
+                requestUrl.includes('analytics') || 
+                requestUrl.includes('tracking')) {
                 request.abort();
             } else {
                 request.continue();
@@ -339,7 +339,7 @@ app.get('/api/extract-stream', async (req, res) => {
         });
 
         console.log('🌐 Navigating to URL...');
-        await page.goto(url, { 
+        await page.goto(targetUrl, { 
             waitUntil: 'networkidle2',
             timeout: 60000 // 60 seconds timeout for slow loading
         });
@@ -499,7 +499,7 @@ app.get('/api/extract-stream', async (req, res) => {
                     console.log(`✅ Using ${type} source (converted to absolute URL):`, streamUrl);
                     break;
                 } else if (src.startsWith('/')) {
-                    const urlObj = new URL(url);
+                    const urlObj = new URL(targetUrl);
                     streamUrl = urlObj.origin + src;
                     console.log(`✅ Using ${type} source (converted to absolute URL):`, streamUrl);
                     break;
@@ -539,15 +539,15 @@ app.get('/api/extract-stream', async (req, res) => {
         if (streamUrl.startsWith('//')) {
             streamUrl = 'https:' + streamUrl;
         } else if (streamUrl.startsWith('/')) {
-            const urlObj = new URL(url);
+            const urlObj = new URL(targetUrl);
             streamUrl = urlObj.origin + streamUrl;
         }
 
         console.log('\n✅ === CLEAN STREAM URL EXTRACTED (NO ADS) ===');
         console.log('🎬 Stream URL:', streamUrl);
         console.log('\n📋 Summary:');
-        console.log('- Original URL:', url);
-        console.log('- Content Type:', url.includes('/tv/') ? 'TV Show' : 'Movie');
+        console.log('- Original URL:', targetUrl);
+        console.log('- Content Type:', targetUrl.includes('/tv/') ? 'TV Show' : 'Movie');
         console.log('- Clean Stream URL:', streamUrl);
         console.log('- Type:', streamUrl.includes('.m3u8') ? 'HLS (M3U8)' : 'Direct Video');
         
@@ -555,12 +555,12 @@ app.get('/api/extract-stream', async (req, res) => {
             success: true,
             streamUrl: streamUrl,
             type: streamUrl.includes('.m3u8') ? 'hls' : 'direct',
-            contentType: url.includes('/tv/') ? 'tv' : 'movie',
+            contentType: targetUrl.includes('/tv/') ? 'tv' : 'movie',
             info: {
-                originalUrl: url,
+                originalUrl: targetUrl,
                 cleanStreamUrl: streamUrl,
                 isAdFree: true,
-                contentType: url.includes('/tv/') ? 'tv' : 'movie'
+                contentType: targetUrl.includes('/tv/') ? 'tv' : 'movie'
             }
         });
     } catch (error) {
