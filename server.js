@@ -577,88 +577,6 @@ app.get('/api/extract-stream', async (req, res) => {
     }
 });
 
-// Simple CORS-enabled video proxy
-app.get('/api/video-proxy', async (req, res) => {
-    const url = req.query.url;
-
-    if (!url) {
-        return res.status(400).json({ error: 'URL parameter is required' });
-    }
-
-    try {
-        console.log('🎬 Proxying video URL:', url);
-
-        // Set CORS headers for video content
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Range, Accept, Accept-Encoding, Referer, User-Agent');
-
-        // Handle preflight requests
-        if (req.method === 'OPTIONS') {
-            res.status(200).end();
-            return;
-        }
-
-        const response = await axios({
-            method: 'get',
-            url: url,
-            responseType: 'stream',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://vidlink.pro/',
-                'Accept': '*/*',
-                'Accept-Encoding': 'identity;q=1, *;q=0',
-                'Connection': 'keep-alive'
-            },
-            timeout: 30000,
-            maxContentLength: 1024 * 1024 * 1024,
-            maxBodyLength: 1024 * 1024 * 1024,
-            validateStatus: function (status) {
-                // Accept both successful and redirect status codes
-                return status >= 200 && status < 400;
-            },
-            decompress: false,
-            maxRedirects: 10
-        });
-
-        // Forward important headers
-        if (response.headers['content-type']) {
-            res.setHeader('Content-Type', response.headers['content-type']);
-        }
-        if (response.headers['content-length']) {
-            res.setHeader('Content-Length', response.headers['content-length']);
-        }
-        if (response.headers['accept-ranges']) {
-            res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
-        }
-
-        // Handle range requests for seeking
-        const range = req.headers.range;
-        if (range && response.status === 200) {
-            res.setHeader('Content-Range', response.headers['content-range'] || `bytes ${range.replace('bytes=', '')}/*`);
-            res.status(206);
-        } else {
-            res.status(response.status);
-        }
-
-        response.data.pipe(res);
-
-    } catch (error) {
-        console.error('Video proxy error:', error);
-        res.status(error.response?.status || 500).json({
-            error: 'Failed to proxy video',
-            details: error.message
-        });
-    }
-});
-
-// Start the server
-app.listen(PORT, () => {
-    console.log(`Proxy server running on http://localhost:${PORT}`);
-});
-
-
-
 // Updated /api/video-proxy route with HLS playlist rewrite and Range handling
 app.get('/api/video-proxy', async (req, res) => {
   try {
@@ -725,4 +643,9 @@ app.get('/api/video-proxy', async (req, res) => {
     console.error('Proxy error:', error.message);
     res.status(500).send('Error proxying video: ' + error.message);
   }
+});
+
+// Start the server
+app.listen(PORT, () => {
+    console.log(`Proxy server running on http://localhost:${PORT}`);
 });
