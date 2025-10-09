@@ -588,7 +588,17 @@ app.get('/api/video-proxy', async (req, res) => {
       'Referer': req.query.referer || 'https://vidlink.pro/',
       'Accept': '*/*',
       'Accept-Encoding': 'identity;q=1, *;q=0',
-      'Connection': 'keep-alive'
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Pragma': 'no-cache',
+      'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+      'Sec-Ch-Ua-Mobile': '?0',
+      'Sec-Ch-Ua-Platform': '"Windows"',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'cross-site',
+      'Origin': 'https://vidlink.pro'
     };
     if (req.headers.range) forwardHeaders.Range = req.headers.range;
 
@@ -596,7 +606,7 @@ app.get('/api/video-proxy', async (req, res) => {
     if (url.toLowerCase().endsWith('.m3u8')) {
       const playlistResp = await axios.get(url, {
         headers: forwardHeaders,
-        timeout: 20000,
+        timeout: 30000, // Increased timeout
         responseType: 'text',
         validateStatus: s => s >= 200 && s < 400
       });
@@ -625,7 +635,7 @@ app.get('/api/video-proxy', async (req, res) => {
       url,
       responseType: 'stream',
       headers: forwardHeaders,
-      timeout: 30000,
+      timeout: 60000, // Increased timeout for video segments
       maxRedirects: 10,
       validateStatus: s => s >= 200 && s < 400
     });
@@ -641,6 +651,7 @@ app.get('/api/video-proxy', async (req, res) => {
 
   } catch (error) {
     console.error('Proxy error:', error.message);
+    console.error('Error details:', error.response?.status, error.response?.statusText);
     res.status(500).send('Error proxying video: ' + error.message);
   }
 });
