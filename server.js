@@ -317,258 +317,153 @@ app.get('/api/discover/:type', async (req, res) => {
     }
 });
 
-// Extract stream URL from video provider
+// Extract stream URL from video provider with fallback sources
 app.get('/api/extract-stream', async (req, res) => {
     let page;
     try {
         const { url: targetUrl } = req.query;
-        
+
         if (!targetUrl) {
             return res.status(400).json({ error: 'URL parameter is required' });
         }
-        
+
         console.log('\n=== Extracting Clean Stream URL (No Ads) ===');
         console.log('Original URL:', targetUrl);
-        console.log('Content Type:', targetUrl.includes('/tv/') ? 'TV Show' : 'Movie');
 
-        // Create a new page
-        page = await browser.newPage();
-        
-        // Set user agent and viewport
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        await page.setViewport({ width: 1920, height: 1080 });
-        
-        // Track all network requests to find the actual video stream
-        const capturedUrls = {
-            m3u8: [],
-            mp4: [],
-            iframe: [],
-            other: []
-        };
-        
-        // Enable request interception to capture video URLs
-        await page.setRequestInterception(true);
-        page.on('request', (request) => {
-            const requestUrl = request.url();
-            const resourceType = request.resourceType();
-            
-            // Capture video-related URLs
-            if (requestUrl.includes('.m3u8')) {
-                capturedUrls.m3u8.push(requestUrl);
-                console.log('📹 Found M3U8:', requestUrl);
-            } else if (requestUrl.includes('.mp4') || requestUrl.includes('.webm') || requestUrl.includes('.mkv')) {
-                capturedUrls.mp4.push(requestUrl);
-                console.log('📹 Found Video:', requestUrl);
-            }
-            
-            // Block ads and unnecessary resources
-            if (['image', 'stylesheet', 'font'].includes(resourceType) || 
-                requestUrl.includes('ads') || 
-                requestUrl.includes('analytics') || 
-                requestUrl.includes('tracking')) {
-                request.abort();
-            } else {
-                request.continue();
-            }
-        });
+        // Determine content type and extract ID
+        const isMovie = targetUrl.includes('/movie/');
+        const isTV = targetUrl.includes('/tv/');
 
-        console.log('🌐 Navigating to URL...');
-        await page.goto(targetUrl, { 
-            waitUntil: 'networkidle2',
-            timeout: 60000 // 60 seconds timeout for slow loading
-        });
-
-        console.log('⏳ Waiting for video player to load...');
-        
-        // Wait a bit for dynamic content to load
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        
-        // Try to find video elements
-        try {
-            await page.waitForSelector('video, iframe[src*="embed"], iframe[src*="player"]', { timeout: 10000 });
-            console.log('✅ Video player detected');
-        } catch (e) {
-            console.log('⚠️ No video player found immediately, continuing...');
+        if (!isMovie && !isTV) {
+            return res.status(400).json({ error: 'Invalid URL format. Must be movie or TV show URL.' });
         }
 
-        // Get the page content
-        const html = await page.content();
-        
-        // Try multiple approaches to find the stream URL
-        let streamUrl = null;
-        const patterns = [
-            // Try to find the iframe first
-            { 
-                name: 'iframe',
-                pattern: /<iframe[^>]*src=["']([^"']+)["']/i,
-                process: (match) => match[1]
-            },
-            // Look for video sources in scripts
+        // Define sources in order of preference
+        const SOURCES = [
             {
-                name: 'script sources',
-                pattern: /sources\s*:\s*\[\s*{[^}]*src\s*:\s*['"]([^'"]+)['"]/,
-                process: (match) => match[1]
+                name: 'vidlink.pro',
+                movieUrl: (id) => `https://vidlink.pro/movie/${id}?nextbutton=true`,
+                tvUrl: (id, season, episode) => `https://vidlink.pro/tv/${id}/${season}/${episode}?nextbutton=true`,
+                priority: 1
             },
-            // Look for HLS or DASH manifests
             {
-                name: 'HLS/DASH manifest',
-                pattern: /(https?:\/\/[^"'\s]+\.(?:m3u8|mpd)[^"'\s]*)/i,
-                process: (match) => match[1]
-            },
-            // Look for direct video files
-            {
-                name: 'direct video',
-                pattern: /(https?:\/\/[^"'\s]+\.(?:mp4|webm|mkv|avi|mov)[^"'\s]*)/i,
-                process: (match) => match[1]
-            },
-            // Look for JSON data with video info
-            {
-                name: 'JSON data',
-                pattern: /(?:sources|file)\s*[:=]\s*(\[.*?\])/s,
-                process: (match) => {
-                    try {
-                        const sources = JSON.parse(match[1].replace(/'/g, '"'));
-                        return Array.isArray(sources) ? sources[0].file || sources[0].src || sources[0] : sources.file || sources.src;
-                    } catch (e) {
-                        return null;
-                    }
-                }
+                name: 'moviesapi.to',
+                movieUrl: (id) => `https://moviesapi.to/movie/${id}`,
+                tvUrl: (id, season, episode) => `https://moviesapi.to/tv/${id}-${season}-${episode}`,
+                priority: 2
             }
         ];
 
-        console.log('\n📊 Captured URLs Summary:');
-        console.log('M3U8 URLs:', capturedUrls.m3u8.length);
-        console.log('MP4 URLs:', capturedUrls.mp4.length);
-        
-        // Prefer M3U8 (HLS) over direct MP4
-        if (capturedUrls.m3u8.length > 0) {
-            // Choose the M3U8 URL that looks most like a playlist (with base64 encoding)
-            let bestM3u8Url = capturedUrls.m3u8[0];
-            for (const m3u8Url of capturedUrls.m3u8) {
-                if (m3u8Url.includes('MTA4MA==') || m3u8Url.includes('NzIw')) {
-                    bestM3u8Url = m3u8Url;
-                    break;
+        let streamUrl = null;
+
+        // Try each source until we find a working one
+        for (const source of SOURCES) {
+            try {
+                console.log(`\n🔄 Trying source: ${source.name} (priority ${source.priority})`);
+
+                let sourceUrl;
+                if (isMovie) {
+                    const movieId = targetUrl.split('/movie/')[1]?.split('?')[0];
+                    if (!movieId) continue;
+                    sourceUrl = source.movieUrl(movieId);
+                } else if (isTV) {
+                    const tvMatch = targetUrl.match(/\/tv\/(\d+)\/(\d+)\/(\d+)/);
+                    if (!tvMatch) continue;
+                    const [, tvId, season, episode] = tvMatch;
+                    sourceUrl = source.tvUrl(tvId, season, episode);
                 }
-            }
-            streamUrl = bestM3u8Url;
-            console.log('✅ Using best M3U8 URL:', streamUrl);
-        } else if (capturedUrls.mp4.length > 0) {
-            streamUrl = capturedUrls.mp4[0];
-            console.log('✅ Using captured MP4 URL:', streamUrl);
-        }
-        
-        // If we didn't capture anything from network, try page evaluation
-        if (!streamUrl) {
-            console.log('🔍 Extracting video sources using page evaluation...');
-            const videoSources = await page.evaluate(() => {
-                const sources = [];
-                
-                // Check for video elements
-                document.querySelectorAll('video source, video').forEach(video => {
-                    const src = video.src || video.getAttribute('data-src');
-                    if (src) sources.push({ type: 'video', src });
+
+                console.log('Source URL:', sourceUrl);
+
+                // Create a new page for each source attempt
+                page = await browser.newPage();
+
+                // Set user agent and viewport
+                await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+                await page.setViewport({ width: 1920, height: 1080 });
+
+                // Track network requests
+                const capturedUrls = { m3u8: [], mp4: [], iframe: [], other: [] };
+
+                await page.setRequestInterception(true);
+                page.on('request', (request) => {
+                    const requestUrl = request.url();
+                    const resourceType = request.resourceType();
+
+                    if (requestUrl.includes('.m3u8')) {
+                        capturedUrls.m3u8.push(requestUrl);
+                        console.log('📹 Found M3U8:', requestUrl);
+                    } else if (requestUrl.includes('.mp4') || requestUrl.includes('.webm') || requestUrl.includes('.mkv')) {
+                        capturedUrls.mp4.push(requestUrl);
+                        console.log('📹 Found Video:', requestUrl);
+                    }
+
+                    if (['image', 'stylesheet', 'font'].includes(resourceType) ||
+                        requestUrl.includes('ads') ||
+                        requestUrl.includes('analytics') ||
+                        requestUrl.includes('tracking')) {
+                        request.abort();
+                    } else {
+                        request.continue();
+                    }
                 });
-                
-                // Check for iframes
-                document.querySelectorAll('iframe').forEach(iframe => {
-                    const src = iframe.src || iframe.getAttribute('data-src');
-                    if (src) sources.push({ type: 'iframe', src });
+
+                console.log('🌐 Navigating to source URL...');
+                await page.goto(sourceUrl, {
+                    waitUntil: 'networkidle2',
+                    timeout: 60000
                 });
-                
-                // Check for JSON data in scripts
-                document.querySelectorAll('script').forEach(script => {
-                    const content = script.textContent;
-                    
-                    // Look for various video URL patterns
-                    const patterns = [
-                        /sources\s*:\s*(\[.*?\])/s,
-                        /file\s*:\s*["']([^"']+\.m3u8[^"']*)["']/,
-                        /src\s*:\s*["']([^"']+\.m3u8[^"']*)["']/,
-                        /https?:\/\/[^\s"']+\.m3u8[^\s"']*/g
-                    ];
-                    
-                    patterns.forEach(pattern => {
-                        const matches = content.match(pattern);
-                        if (matches) {
-                            if (pattern.toString().includes('sources')) {
-                                try {
-                                    const data = JSON.parse(matches[1]);
-                                    data.forEach(item => {
-                                        if (item.src || item.file) {
-                                            sources.push({ type: 'json', src: item.src || item.file });
-                                        }
-                                    });
-                                } catch (e) {
-                                    // Ignore JSON parse errors
-                                }
-                            } else {
-                                sources.push({ type: 'script', src: matches[1] || matches[0] });
-                            }
+
+                await new Promise(resolve => setTimeout(resolve, 5000));
+
+                // Try to find video elements
+                try {
+                    await page.waitForSelector('video, iframe[src*="embed"], iframe[src*="player"]', { timeout: 10000 });
+                    console.log('✅ Video player detected');
+                } catch (e) {
+                    console.log('⚠️ No video player found immediately, continuing...');
+                }
+
+                // Prefer M3U8 over direct MP4 for this source
+                if (capturedUrls.m3u8.length > 0) {
+                    let bestM3u8Url = capturedUrls.m3u8[0];
+                    for (const m3u8Url of capturedUrls.m3u8) {
+                        if (m3u8Url.includes('MTA4MA==') || m3u8Url.includes('NzIw')) {
+                            bestM3u8Url = m3u8Url;
+                            break;
                         }
-                    });
-                });
-                
-                return sources;
-            });
+                    }
+                    streamUrl = bestM3u8Url;
+                    console.log(`✅ Found working stream from ${source.name}:`, streamUrl);
+                    break; // Success! Exit the source loop
+                } else if (capturedUrls.mp4.length > 0) {
+                    streamUrl = capturedUrls.mp4[0];
+                    console.log(`✅ Found working stream from ${source.name}:`, streamUrl);
+                    break; // Success! Exit the source loop
+                }
 
-            console.log('Found potential video sources:', videoSources.length);
-            
-            // Try to find the best source
-            for (const source of videoSources) {
-                const { type, src } = source;
-                console.log(`Found ${type} source:`, src);
-                
-                // Skip empty or invalid URLs
-                if (!src || typeof src !== 'string') continue;
-                
-                // Skip ad-related URLs
-                if (src.includes('ads') || src.includes('doubleclick') || src.includes('analytics')) {
-                    console.log('⚠️ Skipping ad-related URL');
-                    continue;
-                }
-                
-                // Make relative URLs absolute
-                if (src.startsWith('//')) {
-                    streamUrl = 'https:' + src;
-                    console.log(`✅ Using ${type} source (converted to absolute URL):`, streamUrl);
-                    break;
-                } else if (src.startsWith('/')) {
-                    const urlObj = new URL(targetUrl);
-                    streamUrl = urlObj.origin + src;
-                    console.log(`✅ Using ${type} source (converted to absolute URL):`, streamUrl);
-                    break;
-                } else if (src.startsWith('http')) {
-                    streamUrl = src;
-                    console.log(`✅ Using ${type} source:`, streamUrl);
-                    break;
-                }
+                console.log(`❌ No stream found from ${source.name}, trying next source...`);
+                await page.close();
+
+            } catch (sourceError) {
+                console.log(`❌ Error with ${source.name}:`, sourceError.message);
+                if (page) await page.close();
+                continue; // Try next source
             }
         }
 
-        // If still no match, try to find any URL that looks like a video source in the page content
         if (!streamUrl) {
-            console.log('No video sources found, trying fallback pattern matching...');
-            const urlMatch = html.match(/(https?:\/\/[^"'\s]+\/(?:videos?|streams?|embed|player)\/[^"'\s]+)/i);
-            if (urlMatch) {
-                streamUrl = urlMatch[1];
-                console.log('Found URL using fallback pattern:', streamUrl);
-            }
-        }
-        
-        if (!streamUrl) {
-            console.error('\n❌ Error: Could not extract stream URL from page');
-            console.log('Tried multiple methods but no match found');
-            
-            return res.status(404).json({ 
+            console.error('\n❌ Error: Could not extract stream URL from any source');
+            return res.status(404).json({
                 error: 'Could not extract stream URL',
                 debug: {
-                    message: 'No matching URL pattern found in page content',
-                    capturedUrls: capturedUrls,
-                    suggestion: 'The video might be protected by additional security measures or the page structure has changed'
+                    message: 'No matching URL pattern found from any source',
+                    triedSources: SOURCES.map(s => s.name),
+                    suggestion: 'All sources failed or video might be protected'
                 }
             });
         }
-        
+
         // Make sure the URL is absolute
         if (streamUrl.startsWith('//')) {
             streamUrl = 'https:' + streamUrl;
@@ -579,32 +474,33 @@ app.get('/api/extract-stream', async (req, res) => {
 
         console.log('\n✅ === CLEAN STREAM URL EXTRACTED (NO ADS) ===');
         console.log('🎬 Stream URL:', streamUrl);
-        console.log('\n📋 Summary:');
+        console.log('📋 Summary:');
         console.log('- Original URL:', targetUrl);
-        console.log('- Content Type:', targetUrl.includes('/tv/') ? 'TV Show' : 'Movie');
+        console.log('- Content Type:', isTV ? 'TV Show' : 'Movie');
         console.log('- Clean Stream URL:', streamUrl);
         console.log('- Type:', streamUrl.includes('.m3u8') ? 'HLS (M3U8)' : 'Direct Video');
-        
-        res.json({ 
+
+        res.json({
             success: true,
             streamUrl: streamUrl,
             type: streamUrl.includes('.m3u8') ? 'hls' : 'direct',
-            contentType: targetUrl.includes('/tv/') ? 'tv' : 'movie',
+            contentType: isTV ? 'tv' : 'movie',
+            source: 'multiple_sources',
             info: {
                 originalUrl: targetUrl,
                 cleanStreamUrl: streamUrl,
                 isAdFree: true,
-                contentType: targetUrl.includes('/tv/') ? 'tv' : 'movie'
+                contentType: isTV ? 'tv' : 'movie'
             }
         });
+
     } catch (error) {
         console.error('Error extracting stream URL:', error);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Failed to extract stream URL',
             details: error.message
         });
     } finally {
-        // Close the page when done
         if (page) {
             await page.close().catch(e => console.error('Error closing page:', e));
         }
