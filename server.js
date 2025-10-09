@@ -46,12 +46,46 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+    origin: function (origin, callback) {
+        // Allow requests with no origin (mobile apps, etc.)
+        if (!origin) return callback(null, true);
+
+        // Allow specific frontend domains
+        const allowedOrigins = [
+            'https://faheemzmovies.netlify.app',
+            'http://localhost:5173',
+            'http://localhost:3000',
+            'https://faheemzmovies-backend.onrender.com'
+        ];
+
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        } else {
+            console.warn('CORS blocked request from origin:', origin);
+            return callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Range', 'Accept', 'Accept-Encoding', 'Referer', 'User-Agent']
+}));
 app.use(express.json());
 
-// Set basic security headers
+// Set basic security headers and ensure CORS
 app.use((req, res, next) => {
-    // Set Content Security Policy
+    // Ensure CORS headers are always set
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || 'https://faheemzmovies.netlify.app');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Range, Accept, Accept-Encoding, Referer, User-Agent');
+
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+        res.status(200).end();
+        return;
+    }
+
     next();
 });
 
